@@ -526,11 +526,42 @@ export default async (interaction) => {
         if (interaction.customId === 'vc_modal_rename') {
             if (!vcData) return interaction.editReply({ content: 'عذراً، لم يتم العثور على بيانات هذه الغرفة.' });
             const newName = interaction.fields.getTextInputValue('new_name');
+            const oldName = vcData.name || channel.name;
+
+            // Rename the voice channel
             await channel.setName(newName).catch(() => {});
+
+            // Find and rename the role — even if roleId is missing in DB, search by old name
+            let vcRole = null;
             if (vcData.roleId) {
-                const roleToRename = interaction.guild.roles.cache.get(vcData.roleId) || await interaction.guild.roles.fetch(vcData.roleId).catch(() => null);
-                if (roleToRename) await roleToRename.setName(newName).catch(() => {});
+                vcRole = interaction.guild.roles.cache.get(vcData.roleId)
+                    || await interaction.guild.roles.fetch(vcData.roleId).catch(() => null);
             }
+            // Fallback: find role by old channel name if roleId is not stored/valid
+            if (!vcRole && oldName) {
+                vcRole = interaction.guild.roles.cache.find(r => r.name === oldName) || null;
+            }
+            if (vcRole) {
+                await vcRole.setName(newName).catch(() => {});
+                // Persist the roleId in case it was missing
+                if (!vcData.roleId) {
+                    vcData.roleId = vcRole.id;
+                }
+                // Give the role to all members currently in the voice channel who don't have it yet
+                try {
+                    const voiceChannel = interaction.guild.channels.cache.get(vcData.channelId);
+                    if (voiceChannel && voiceChannel.members) {
+                        for (const [, m] of voiceChannel.members) {
+                            if (!m.roles.cache.has(vcRole.id)) {
+                                await m.roles.add(vcRole).catch(() => {});
+                            }
+                        }
+                    }
+                } catch (roleErr) {
+                    console.error('[Rename Role Sync Error]:', roleErr);
+                }
+            }
+
             vcData.name = newName;
             await vcData.save();
             await interaction.editReply({ 
