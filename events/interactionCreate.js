@@ -147,15 +147,27 @@ export default async (interaction) => {
     // We only care about Private VC interactions (`vc_...`)
     if (!interaction.customId || !interaction.customId.startsWith('vc_')) return;
 
-    const channel = interaction.channel;
+    let channel = interaction.channel;
     let vcData = await PrivateVC.findOne({ channelId: interaction.channelId });
 
-    // Fallback: Check if the user is the owner but the channel ID hasn't updated in DB yet
-    if (!vcData) {
-        vcData = await PrivateVC.findOne({ ownerId: interaction.user.id, guildId: interaction.guild.id });
-        if (vcData && !vcData.channelId) {
-            vcData.channelId = interaction.channelId;
-            await vcData.save().catch(() => {});
+    // إذا تم استخدام الأزرار من لوحة التحكم العامة (أو من قناة ليست قناة الغرفة نفسها)
+    if (interaction.channelId === config.controlPanelChannelId || !vcData) {
+        if (!interaction.member || !interaction.member.voice || !interaction.member.voice.channelId) {
+            return interaction.reply({ 
+                content: '❌ أنت لست في روم صوتي للتحكم بها!', 
+                flags: [MessageFlags.Ephemeral] 
+            });
+        }
+        channel = interaction.member.voice.channel;
+        vcData = await PrivateVC.findOne({ channelId: channel.id });
+
+        // Fallback: Check if the user is the owner but the channel ID hasn't updated in DB yet
+        if (!vcData) {
+            vcData = await PrivateVC.findOne({ ownerId: interaction.user.id, guildId: interaction.guild.id });
+            if (vcData && !vcData.channelId) {
+                vcData.channelId = channel.id;
+                await vcData.save().catch(() => {});
+            }
         }
     }
 
@@ -167,7 +179,7 @@ export default async (interaction) => {
 
         // 2. Room Owner check
         if (!vcData) {
-            console.log(`[VC Debug] No data found for channel: ${interaction.channelId}`);
+            console.log(`[VC Debug] No data found for channel: ${channel ? channel.id : interaction.channelId}`);
             return false;
         }
         return interaction.user.id === vcData.ownerId;
