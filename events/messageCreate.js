@@ -1,5 +1,6 @@
 import { MessageFlags, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, PermissionFlagsBits } from 'discord.js';
 import { checkManageVoicesPerm, buildManageVoicesPanel } from '../utils/manageVoicesHelper.js';
+import { generatePVCGuideImage } from '../utils/pvcImage.js';
 import PrivateVC from '../models/PrivateVC.js';
 import config from '../config/config.js';
 
@@ -75,22 +76,19 @@ export default async (message) => {
         );
 
         const embed = new EmbedBuilder()
-            .setTitle('👑 لوحة تحكم الغرفة الملكية — Galaxy Temp Voice')
-            .setDescription(
-                '> استخدم الأزرار بالأسفل لإدارة غرفتك الصوتية بالكامل ⚡\n' +
-                '> يمكنك إرسال `تحكم` في أي وقت لاستدعاء اللوحة مجدداً.'
-            )
+            .setTitle('👑 لوحة تحكم الغرفة الملكية - Galaxy Temp Voice')
+            .setDescription('مرحباً بك مجدداً! تم استعادة إعدادات غرفتك السابقة تلقائياً.\n\nاستخدم الأزرار بالأسفل لإدارة غرفتك الصوتية بالكامل وبأقصى سرعة ⚡.')
             .setColor('#8A2BE2')
-            .setFooter({ text: `Galaxy Temp Voice • طلب بواسطة: ${message.author.username}` })
-            .setTimestamp();
+            .setImage('attachment://pvc_guide.png');
+
+        const guideImageBuffer = await generatePVCGuideImage().catch(() => null);
 
         await message.reply({
             embeds: [embed],
-            components: [row1, row2]
+            components: [row1, row2],
+            files: guideImageBuffer ? [{ attachment: guideImageBuffer, name: 'pvc_guide.png' }] : []
         }).catch(() => {});
 
-        // حذف رسالة المستخدم بعد ثانية
-        message.delete().catch(() => {});
         return;
     }
 
