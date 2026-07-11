@@ -1,8 +1,12 @@
-import { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import PrivateVC from '../models/PrivateVC.js';
 import { generatePVCGuideImage } from '../utils/pvcImage.js';
 import Coin from '../models/Coin.js';
 import config from '../config/config.js';
+
+// Role IDs for gender-based visibility
+const MALE_ROLE_ID = '1505841836466634762';
+const FEMALE_ROLE_ID = '1505841838018269255';
 
 const creatingChannels = new Set();
 const voiceJoinTimes = new Map(); // key: userId, value: Date
@@ -109,44 +113,49 @@ export default async (oldState, newState) => {
             const channelName = vcData?.name || `${member.user.username}'s VC`;
             const userLimit = vcData?.limit || 0;
 
+            // Build default permission overwrites — open & visible to everyone by default
+            const defaultPerms = [
+                {
+                    id: guild.id, // @everyone — open by default
+                    allow: ['ViewChannel', 'Connect', 'SendMessages', 'ReadMessageHistory'],
+                    deny: []
+                },
+                {
+                    id: member.id, // The creator gets full control
+                    allow: ['ManageChannels', 'MoveMembers', 'DeafenMembers', 'MuteMembers', 'Connect', 'ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+                },
+            ];
+
             const newChannel = await guild.channels.create({
                 name: channelName,
                 type: ChannelType.GuildVoice,
                 parent: parentId,
                 userLimit: userLimit,
-                permissionOverwrites: [
-                    {
-                        id: guild.id, // @everyone
-                        allow: [],
-                        deny: ['ViewChannel']
-                    },
-                    {
-                        id: member.id, // The creator
-                        allow: ['ManageChannels', 'MoveMembers', 'DeafenMembers', 'MuteMembers', 'Connect', 'ViewChannel'],
-                    },
-                ],
+                permissionOverwrites: defaultPerms,
             });
 
-            // Apply privacyMode permissions
-            if (vcData?.privacyMode === 'all') {
-                await newChannel.permissionOverwrites.edit(guild.id, { ViewChannel: true });
-            } else if (vcData?.privacyMode === 'female') {
-                const femaleRole = guild.roles.cache.find(r => r.name === 'female' || r.name === 'بنات');
+            // Apply privacyMode permissions (only if user had a saved preference)
+            if (vcData?.privacyMode === 'female') {
+                // Hide from everyone, show only to female role
+                await newChannel.permissionOverwrites.edit(guild.id, { ViewChannel: false, Connect: false });
+                const femaleRole = guild.roles.cache.get(FEMALE_ROLE_ID);
                 if (femaleRole) {
-                    await newChannel.permissionOverwrites.edit(femaleRole.id, { ViewChannel: true });
+                    await newChannel.permissionOverwrites.edit(FEMALE_ROLE_ID, { ViewChannel: true, Connect: true });
                 }
             } else if (vcData?.privacyMode === 'male') {
-                const maleRole = guild.roles.cache.find(r => r.name === 'male' || r.name === 'ولاد');
+                // Hide from everyone, show only to male role
+                await newChannel.permissionOverwrites.edit(guild.id, { ViewChannel: false, Connect: false });
+                const maleRole = guild.roles.cache.get(MALE_ROLE_ID);
                 if (maleRole) {
-                    await newChannel.permissionOverwrites.edit(maleRole.id, { ViewChannel: true });
+                    await newChannel.permissionOverwrites.edit(MALE_ROLE_ID, { ViewChannel: true, Connect: true });
                 }
             }
+            // privacyMode === 'all' or undefined = already open by default — no extra changes needed
 
-            // Apply lock/hide
+            // Apply lock/hide from saved preferences
             if (vcData?.isHidden) {
-                await newChannel.permissionOverwrites.edit(guild.id, { ViewChannel: false });
-            }
-            if (vcData?.isLocked) {
+                await newChannel.permissionOverwrites.edit(guild.id, { ViewChannel: false, Connect: false });
+            } else if (vcData?.isLocked) {
                 await newChannel.permissionOverwrites.edit(guild.id, { Connect: false });
             }
 

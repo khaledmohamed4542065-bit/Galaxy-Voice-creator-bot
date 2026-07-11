@@ -5,10 +5,64 @@ import GuildSettings from '../models/GuildSettings.js';
 import config from '../config/config.js';
 import { checkManageVoicesPerm, getManageVoicesData, buildManageVoicesPanel } from '../utils/manageVoicesHelper.js';
 
+// Fixed role IDs for gender-based visibility
+const MALE_ROLE_ID = '1505841836466634762';
+const FEMALE_ROLE_ID = '1505841838018269255';
+
 let adminCache = null;
 
 export function clearAdminCache() {
     adminCache = null;
+}
+
+/**
+ * Build and return a status embed for the given VC data.
+ * Color changes to red when locked/hidden.
+ */
+function buildStatusEmbed(vcData, channelName) {
+    const privacyMap = {
+        all: '👥 تظهر للكل',
+        female: '👩 للبنات بس',
+        male: '👨 للولاد بس'
+    };
+    const privacyText = privacyMap[vcData.privacyMode] || '👥 تظهر للكل';
+    const limitText = vcData.limit === 0 ? 'لا يوجد حد' : `${vcData.limit} عضو`;
+    const lockStatus = vcData.isLocked ? '`مقفول`' : '`مفتوح`';
+    const lockIcon = vcData.isLocked ? '⛔' : '✅';
+    const hideStatus = vcData.isHidden ? '`مخفي`' : '`ظاهر`';
+    const hideIcon = vcData.isHidden ? '👻' : '👁️';
+
+    return new EmbedBuilder()
+        .setTitle('📊 لوحة حالة الغرفة الصوتية')
+        .setColor(vcData.isLocked || vcData.isHidden ? '#FF4757' : '#8A2BE2')
+        .setDescription(
+            `\`\`\`\n  الغرفة: ${channelName}\n\`\`\`\n` +
+            `\n🔹 **إعدادات الغرفة**\n` +
+            `> ${lockIcon} القفل — ${lockStatus}\n` +
+            `> ${hideIcon} الإخفاء — ${hideStatus}\n` +
+            `> 👥 الظهور — \`${privacyText}\`\n` +
+            `> 🔢 الحد الأقصى — \`${limitText}\`\n` +
+            `\n🔹 **الأعضاء**\n` +
+            `> 🤝 الموثوقون — \`${vcData.trustedUsers.length} عضو\`\n` +
+            `> 🙅 المحظورون — \`${vcData.blockedUsers.length} عضو\``
+        )
+        .setFooter({ text: 'Galaxy Temp Voice • يتحدث تلقائياً عند كل تغيير' })
+        .setTimestamp();
+}
+
+/**
+ * Send an auto-updating status embed in the VC's text channel.
+ * This is triggered after any privacy change.
+ */
+async function sendAutoStatusUpdate(channel, vcData) {
+    try {
+        const channelName = channel ? channel.name : (vcData.name || 'غير معروف');
+        await channel.send({
+            embeds: [buildStatusEmbed(vcData, channelName)]
+        });
+    } catch (e) {
+        // Silently ignore if we can't send
+    }
 }
 
 export default async (interaction) => {
@@ -247,35 +301,10 @@ export default async (interaction) => {
                 });
             }
 
-            const privacyText = {
-                all: 'تظهر للولاد والبنات 👥',
-                female: 'تظهر للبنات بس 👩',
-                male: 'تظهر للولاد بس 👨'
-            }[vcData.privacyMode] || 'تظهر للكل 👥';
-
-            const limitText = vcData.limit === 0 ? 'مفتوح 👥' : `${vcData.limit} عضو`;
-            const lockText = vcData.isLocked ? 'مقفول 🔒' : 'مفتوح 🔓';
-            const hideText = vcData.isHidden ? 'مخفي 👻' : 'ظاهر 👁️';
             const channelName = channel ? channel.name : vcData.name;
 
-            const statusEmbed = new EmbedBuilder()
-                .setTitle('📊 حالة الغرفة الصوتية الحالية')
-                .setColor('#8A2BE2')
-                .setDescription(`هذه هي إعدادات غرفتك الصوتية في الوقت الفعلي:`)
-                .addFields(
-                    { name: '📝 الاسم', value: `\`${channelName}\``, inline: true },
-                    { name: '👥 الحد الأقصى', value: `\`${limitText}\``, inline: true },
-                    { name: '🛡️ الخصوصية', value: `\`${privacyText}\``, inline: true },
-                    { name: '🔒 القفل', value: `\`${lockText}\``, inline: true },
-                    { name: '👁️ الإخفاء', value: `\`${hideText}\``, inline: true },
-                    { name: '🤝 الموثوقين', value: `\`${vcData.trustedUsers.length}\` عضو`, inline: true },
-                    { name: '🚫 المحظورين', value: `\`${vcData.blockedUsers.length}\` عضو`, inline: true }
-                )
-                .setFooter({ text: `Galaxy Temp Voice • طلب بواسطة: ${interaction.user.username}` })
-                .setTimestamp();
-
             return interaction.reply({
-                embeds: [statusEmbed],
+                embeds: [buildStatusEmbed(vcData, channelName)],
                 flags: [MessageFlags.Ephemeral]
             });
         }
@@ -297,8 +326,9 @@ export default async (interaction) => {
                     await channel.permissionOverwrites.edit(everyone, { SendMessages: false, ReadMessageHistory: false });
                     vcData.isLocked = true;
                     await vcData.save();
+                    await sendAutoStatusUpdate(channel, vcData);
                     return interaction.update({ 
-                        embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم قفل الروم والشات بنجاح! 🔒**')], 
+                        embeds: [new EmbedBuilder().setColor('#FF4757').setDescription('>>> **تم قفل الروم والشات بنجاح! 🔒**')], 
                         components: [] 
                     });
                 } catch (error) {
@@ -311,11 +341,12 @@ export default async (interaction) => {
             }
             if (selection === 'privacy_unlock') {
                 try {
-                    await channel.permissionOverwrites.edit(everyone, { Connect: true });
+                    await channel.permissionOverwrites.edit(everyone, { Connect: true, SendMessages: true, ReadMessageHistory: true });
                     vcData.isLocked = false;
                     await vcData.save();
+                    await sendAutoStatusUpdate(channel, vcData);
                     return interaction.update({ 
-                        embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم فتح الروم للجميع! 🔓**')], 
+                        embeds: [new EmbedBuilder().setColor('#2ECC71').setDescription('>>> **تم فتح الروم للجميع! 🔓**')], 
                         components: [] 
                     });
                 } catch (error) {
@@ -336,18 +367,20 @@ export default async (interaction) => {
                 vcData.isHidden = true;
                 vcData.isLocked = true;
                 await vcData.save();
+                await sendAutoStatusUpdate(channel, vcData);
                 return interaction.update({ 
-                    embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم إخفاء وقفل الروم والشات عن الجميع! 👻🔒**')], 
+                    embeds: [new EmbedBuilder().setColor('#FF4757').setDescription('>>> **تم إخفاء وقفل الروم والشات عن الجميع! 👻🔒**')], 
                     components: [] 
                 });
             }
             if (selection === 'privacy_show') {
                 try {
-                    await channel.permissionOverwrites.edit(everyone, { ViewChannel: true });
+                    await channel.permissionOverwrites.edit(everyone, { ViewChannel: true, Connect: true });
                     vcData.isHidden = false;
                     await vcData.save();
+                    await sendAutoStatusUpdate(channel, vcData);
                     return interaction.update({ 
-                        embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم إظهار الروم للجميع! 👁️**')], 
+                        embeds: [new EmbedBuilder().setColor('#2ECC71').setDescription('>>> **تم إظهار الروم للجميع! 👁️**')], 
                         components: [] 
                     });
                 } catch (error) {
@@ -382,39 +415,38 @@ export default async (interaction) => {
             }
 
             if (selection === 'privacy_all') {
-                await channel.permissionOverwrites.edit(everyone, { ViewChannel: true });
+                await channel.permissionOverwrites.edit(everyone, { ViewChannel: true, Connect: true });
                 vcData.privacyMode = 'all';
                 await vcData.save();
+                await sendAutoStatusUpdate(channel, vcData);
                 return interaction.update({ 
-                    embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم تعيين الروم لتظهر للجميع! 👥**')], 
+                    embeds: [new EmbedBuilder().setColor('#2ECC71').setDescription('>>> **تم تعيين الروم لتظهر للجميع! 👥**')], 
                     components: [] 
                 });
             }
 
             if (selection === 'privacy_female') {
-                const femaleRole = interaction.guild.roles.cache.find(r => r.name === 'female' || r.name === 'بنات');
-                await channel.permissionOverwrites.edit(everyone, { ViewChannel: false });
-                if (femaleRole) {
-                    await channel.permissionOverwrites.edit(femaleRole.id, { ViewChannel: true });
-                }
+                // Use fixed female role ID
+                await channel.permissionOverwrites.edit(everyone, { ViewChannel: false, Connect: false });
+                await channel.permissionOverwrites.edit(FEMALE_ROLE_ID, { ViewChannel: true, Connect: true });
                 vcData.privacyMode = 'female';
                 await vcData.save();
+                await sendAutoStatusUpdate(channel, vcData);
                 return interaction.update({ 
-                    embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم تعيين الروم لتظهر للبنات فقط! 👩**')], 
+                    embeds: [new EmbedBuilder().setColor('#FF69B4').setDescription('>>> **تم تعيين الروم لتظهر للبنات فقط! 👩**')], 
                     components: [] 
                 });
             }
 
             if (selection === 'privacy_male') {
-                const maleRole = interaction.guild.roles.cache.find(r => r.name === 'male' || r.name === 'ولاد');
-                await channel.permissionOverwrites.edit(everyone, { ViewChannel: false });
-                if (maleRole) {
-                    await channel.permissionOverwrites.edit(maleRole.id, { ViewChannel: true });
-                }
+                // Use fixed male role ID
+                await channel.permissionOverwrites.edit(everyone, { ViewChannel: false, Connect: false });
+                await channel.permissionOverwrites.edit(MALE_ROLE_ID, { ViewChannel: true, Connect: true });
                 vcData.privacyMode = 'male';
                 await vcData.save();
+                await sendAutoStatusUpdate(channel, vcData);
                 return interaction.update({ 
-                    embeds: [new EmbedBuilder().setColor('#8A2BE2').setDescription('>>> **تم تعيين الروم لتظهر للولاد فقط! 👨**')], 
+                    embeds: [new EmbedBuilder().setColor('#4169E1').setDescription('>>> **تم تعيين الروم لتظهر للولاد فقط! 👨**')], 
                     components: [] 
                 });
             }
