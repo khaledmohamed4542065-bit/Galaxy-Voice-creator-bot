@@ -1,0 +1,25 @@
+{
+  "name": "galaxy-temp-voice-bot",
+  "version": "1.0.0",
+  "description": "Galaxy Temp Voice Bot - Standalone High-Performance Royal Voice Channels Bot",
+  "main": "bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
+  },
+  "keywords": [
+    "discord.js",
+    "voice",
+    "temp-voice",
+    "galaxy"
+  ],
+  "author": "Galaxy Team",
+  "license": "MIT",
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.66",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7",
+    "mongoose": "^8.9.3"
+  }
+}
