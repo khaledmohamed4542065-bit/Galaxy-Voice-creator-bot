@@ -32,6 +32,17 @@ client.on('interactionCreate', interactionCreate);
 client.on('channelDelete', channelDelete);
 client.on('messageCreate', messageCreate);
 
+// التحقق من السيرفرات المضافة حديثاً والخروج منها إذا لم تكن مسموحة
+client.on('guildCreate', async (guild) => {
+    console.log(`📥 Added to a new server: "${guild.name}" (ID: ${guild.id})`);
+    if (config.allowedServers.length > 0 && !config.allowedServers.includes(guild.id)) {
+        console.warn(`⚠️ New server "${guild.name}" (${guild.id}) is not allowed! Leaving immediately...`);
+        await guild.leave()
+            .then(() => console.log(`✅ Left unauthorized new server: "${guild.name}" (${guild.id})`))
+            .catch(err => console.error(`❌ Failed to leave unauthorized new server "${guild.name}":`, err.message));
+    }
+});
+
 client.once('clientReady', async () => {
     console.log(`====================================================`);
     console.log(`✅ Galaxy Temp Voice Bot is READY as ${client.user.tag}`);
@@ -39,6 +50,28 @@ client.once('clientReady', async () => {
     console.log(`🎤 Join-To-Create Channel ID: ${config.joinToCreateId}`);
     console.log(`📁 Voice Rooms Category ID: ${config.categoryId}`);
     console.log(`====================================================`);
+
+    // عرض السيرفرات المتواجد فيها البوت والتحقق منها
+    const guilds = client.guilds.cache;
+    console.log(`📡 Bot is currently in ${guilds.size} server(s):`);
+    guilds.forEach(guild => {
+        console.log(`   - Name: "${guild.name}" | ID: ${guild.id}`);
+    });
+    console.log(`====================================================`);
+
+    // الخروج من السيرفرات غير المسموح بها
+    if (config.allowedServers.length > 0) {
+        for (const [id, guild] of guilds) {
+            if (!config.allowedServers.includes(id)) {
+                console.warn(`⚠️ Leaving unauthorized server: "${guild.name}" (ID: ${id})`);
+                await guild.leave()
+                    .then(() => console.log(`✅ Successfully left: "${guild.name}" (${id})`))
+                    .catch(err => console.error(`❌ Failed to leave "${guild.name}" (${id}):`, err.message));
+            }
+        }
+        console.log(`====================================================`);
+    }
+
     try {
         await client.application.commands.create({
             name: 'manage_voices',
